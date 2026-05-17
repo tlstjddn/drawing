@@ -96,19 +96,39 @@
     <main class="flex-1 flex flex-col md:flex-row w-full max-w-7xl mx-auto p-4 gap-6 items-center justify-center">
         
         <!-- Left Panel: Input Area -->
-        <section class="glass-panel w-full md:w-1/3 rounded-2xl p-6 flex flex-col h-[500px]">
+        <section class="glass-panel w-full md:w-1/3 rounded-2xl p-6 flex flex-col min-h-[620px] bg-white">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold text-slate-800">명단 입력</h2>
-                <span id="countBadge" class="bg-blue-600 text-xs px-2 py-1 rounded-full font-bold text-white">0명</span>
+                <h2 class="text-xl font-bold text-slate-800">숫자 범위 설정</h2>
+                <span id="countBadge" class="bg-blue-600 text-xs px-2 py-1 rounded-full font-bold text-white">0개</span>
             </div>
             
-            <p class="text-sm text-slate-500 mb-2">이름을 줄바꿈(엔터) 또는 쉼표(,)로 구분하여 입력하세요.</p>
+            <p class="text-sm text-slate-500 mb-5">시작 숫자와 끝 숫자를 입력하면 해당 범위 안에서 숫자 1개를 추첨합니다.</p>
             
-            <textarea id="namesInput" class="w-full flex-1 bg-white border border-slate-300 rounded-xl p-4 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none shadow-inner" placeholder="홍길동&#10;김철수&#10;이영희&#10;..."></textarea>
-            
-            <button id="drawBtn" class="mt-4 w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500 text-white font-bold py-4 px-6 rounded-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-95 shadow-lg shadow-blue-500/30 text-lg">
-                추첨 시작하기!
-            </button>
+            <div class="flex-1 flex flex-col justify-between gap-4 pt-2">
+                <div>
+                    <label for="startNumberInput" class="block text-sm font-bold text-slate-700 mb-2">시작 숫자</label>
+                    <input id="startNumberInput" type="number" inputmode="numeric" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-4 text-slate-800 text-2xl font-black text-center focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="예: 1" />
+                </div>
+
+                <div class="flex items-center justify-center text-slate-400 font-black text-2xl">~</div>
+
+                <div>
+                    <label for="endNumberInput" class="block text-sm font-bold text-slate-700 mb-2">끝 숫자</label>
+                    <input id="endNumberInput" type="number" inputmode="numeric" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-4 text-slate-800 text-2xl font-black text-center focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="예: 100" />
+                </div>
+
+                <div id="rangePreview" class="min-h-[72px] flex items-center justify-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-center text-sm leading-relaxed text-slate-600">
+                    숫자 범위를 입력해주세요.
+                </div>
+                <div class="grid grid-cols-1 gap-3 pt-2">
+                    <button id="drawBtn" class="w-full h-14 flex items-center justify-center bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-95 shadow-lg shadow-blue-500/30 text-base">
+                        숫자 추첨 시작하기
+                    </button>
+                    <button id="fullResetBtn" class="w-full h-14 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold rounded-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-95 shadow-sm text-base">
+                        처음부터 다시 시작하기
+                    </button>
+                </div>
+            </div>
         </section>
 
         <!-- Right Panel: Machine Area -->
@@ -147,9 +167,12 @@
 
     <script>
         // --- UI Elements ---
-        const namesInput = document.getElementById('namesInput');
+        const startNumberInput = document.getElementById('startNumberInput');
+        const endNumberInput = document.getElementById('endNumberInput');
+        const rangePreview = document.getElementById('rangePreview');
         const countBadge = document.getElementById('countBadge');
         const drawBtn = document.getElementById('drawBtn');
+        const fullResetBtn = document.getElementById('fullResetBtn');
         const resetBtn = document.getElementById('resetBtn');
         const winnerOverlay = document.getElementById('winnerOverlay');
         const winnerText = document.getElementById('winnerText');
@@ -167,6 +190,7 @@
 
         // --- State ---
         let participants = [];
+        let drawnNumbers = [];
         let balls = [];
         let animationId;
         let isDrawing = false;
@@ -245,60 +269,81 @@
 
         function playSuccessSound() {
             if (!audioCtx) return;
-            
-            // 브라스(트럼펫) 신디사이저 느낌
-            const playBrass = (freq, startTime, duration, vol=0.25) => {
+
+            const now = audioCtx.currentTime;
+
+            // 전체 출력 안정화: 소리를 키우되 찢어짐을 줄임
+            const compressor = audioCtx.createDynamicsCompressor();
+            compressor.threshold.setValueAtTime(-18, now);
+            compressor.knee.setValueAtTime(20, now);
+            compressor.ratio.setValueAtTime(6, now);
+            compressor.attack.setValueAtTime(0.003, now);
+            compressor.release.setValueAtTime(0.22, now);
+            compressor.connect(audioCtx.destination);
+
+            const masterGain = audioCtx.createGain();
+            masterGain.gain.setValueAtTime(0.95, now);
+            masterGain.gain.exponentialRampToValueAtTime(0.001, now + 1.35);
+            masterGain.connect(compressor);
+
+            const echoDelay = audioCtx.createDelay();
+            echoDelay.delayTime.setValueAtTime(0.13, now);
+
+            const echoGain = audioCtx.createGain();
+            echoGain.gain.setValueAtTime(0.22, now);
+            echoGain.gain.exponentialRampToValueAtTime(0.001, now + 1.15);
+
+            echoDelay.connect(echoGain);
+            echoGain.connect(compressor);
+
+            const playBrass = (freq, startTime, duration, volume = 0.34) => {
                 const osc1 = audioCtx.createOscillator();
                 const osc2 = audioCtx.createOscillator();
-                const osc3 = audioCtx.createOscillator(); // 소리를 풍성하게 하기 위해 3개 사용
+                const osc3 = audioCtx.createOscillator();
                 const gain = audioCtx.createGain();
                 const filter = audioCtx.createBiquadFilter();
-                
+
                 osc1.type = 'sawtooth';
                 osc2.type = 'sawtooth';
                 osc3.type = 'square';
-                
-                osc1.frequency.value = freq;
-                osc2.frequency.value = freq * 1.005; // 코러스 효과를 위한 미세 튜닝
-                osc3.frequency.value = freq * 0.995;
-                
+                osc1.frequency.setValueAtTime(freq, startTime);
+                osc2.frequency.setValueAtTime(freq * 1.008, startTime);
+                osc3.frequency.setValueAtTime(freq * 0.5, startTime); // 낮은 받침음으로 울림 추가
+
                 filter.type = 'lowpass';
-                filter.frequency.setValueAtTime(3000, startTime); // 처음엔 밝은 소리
-                filter.frequency.exponentialRampToValueAtTime(800, startTime + 0.2); // 점점 둥근 소리로
-                
-                gain.gain.setValueAtTime(0, startTime);
-                gain.gain.linearRampToValueAtTime(vol, startTime + 0.05);
-                gain.gain.setValueAtTime(vol, startTime + duration - 0.1);
-                gain.gain.linearRampToValueAtTime(0, startTime + duration);
-                
+                filter.frequency.setValueAtTime(3200, startTime);
+                filter.frequency.exponentialRampToValueAtTime(1700, startTime + duration);
+
+                gain.gain.setValueAtTime(0.001, startTime);
+                gain.gain.linearRampToValueAtTime(volume, startTime + 0.018);
+                gain.gain.setValueAtTime(volume * 0.85, startTime + Math.max(0.03, duration - 0.08));
+                gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
                 osc1.connect(filter);
                 osc2.connect(filter);
                 osc3.connect(filter);
                 filter.connect(gain);
-                gain.connect(audioCtx.destination);
-                
+                gain.connect(masterGain);
+                gain.connect(echoDelay);
+
                 osc1.start(startTime);
                 osc2.start(startTime);
                 osc3.start(startTime);
-                osc1.stop(startTime + duration);
-                osc2.stop(startTime + duration);
-                osc3.stop(startTime + duration);
+                osc1.stop(startTime + duration + 0.04);
+                osc2.stop(startTime + duration + 0.04);
+                osc3.stop(startTime + duration + 0.04);
             };
 
-            const now = audioCtx.currentTime;
-            // 계이름 주파수 (G4, C5, E5, G5)
-            const G4 = 392.00, C5 = 523.25, E5 = 659.25, G5 = 783.99;
-            
-            // 빰-빰-빰-빠아아암 (팡파레 멜로디)
-            const dt = 0.15; // 박자 간격
-            playBrass(G4, now, dt);
-            playBrass(G4, now + dt, dt);
-            playBrass(G4, now + dt*2, dt);
-            
-            // 마지막 화려한 팡파레 화음!
-            playBrass(C5, now + dt*3, 1.5, 0.3);
-            playBrass(E5, now + dt*3, 1.5, 0.3);
-            playBrass(G5, now + dt*3, 1.5, 0.3);
+            // 더 울림 있는 빵파레: 빰-빰-빠밤!
+            playBrass(523.25, now, 0.18, 0.36);          // C5
+            playBrass(659.25, now + 0.17, 0.18, 0.36);   // E5
+            playBrass(783.99, now + 0.34, 0.24, 0.4);    // G5
+
+            // 마지막 화음: 길이를 살짝 늘려 발표감 강화
+            playBrass(523.25, now + 0.58, 0.58, 0.32);   // C5
+            playBrass(659.25, now + 0.58, 0.58, 0.32);   // E5
+            playBrass(783.99, now + 0.58, 0.58, 0.36);   // G5
+            playBrass(1046.5, now + 0.58, 0.5, 0.22);    // C6
         }
 
         // --- Utilities ---
@@ -310,17 +355,61 @@
             }, 3000);
         }
 
-        // 입력 값 업데이트 이벤트
-        namesInput.addEventListener('input', () => {
-            const rawText = namesInput.value;
-            // 쉼표나 줄바꿈으로 분리 후 공백 제거 및 빈 문자열 필터링
-            participants = rawText.split(/[\n,]+/).map(n => n.trim()).filter(n => n !== '');
-            countBadge.textContent = `${participants.length}명`;
+        // 숫자 범위 업데이트 이벤트
+        function buildNumberPool() {
+            const startNumber = parseInt(startNumberInput.value, 10);
+            const endNumber = parseInt(endNumberInput.value, 10);
+
+            if (Number.isNaN(startNumber) || Number.isNaN(endNumber)) {
+                participants = [];
+                drawnNumbers = [];
+                countBadge.textContent = '0개';
+                rangePreview.textContent = '숫자 범위를 입력해주세요.';
+                if (!isDrawing) initBalls();
+                return;
+            }
+
+            if (startNumber > endNumber) {
+                participants = [];
+                drawnNumbers = [];
+                countBadge.textContent = '0개';
+                rangePreview.textContent = '시작 숫자는 끝 숫자보다 작거나 같아야 합니다.';
+                if (!isDrawing) initBalls();
+                return;
+            }
+
+            const totalCount = endNumber - startNumber + 1;
+            participants = Array.from({ length: totalCount }, (_, index) => String(startNumber + index));
+            drawnNumbers = [];
+            countBadge.textContent = `${participants.length}개`;
+            rangePreview.textContent = `${startNumber}부터 ${endNumber}까지 총 ${totalCount}개의 숫자 중 1개를 추첨합니다.`;
             
             if (!isDrawing) {
                 initBalls();
             }
-        });
+        }
+
+        function updateNumberRange() {
+            buildNumberPool();
+        }
+
+        function resetDrawFromCurrentRange() {
+            winnerOverlay.classList.add('hidden');
+            drawPhase = 'idle';
+            isDrawing = false;
+
+            drawBtn.disabled = false;
+            drawBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            startNumberInput.disabled = false;
+            endNumberInput.disabled = false;
+
+            buildNumberPool();
+            showToast('현재 숫자 범위로 추첨을 처음부터 다시 시작합니다.');
+        }
+
+        startNumberInput.addEventListener('input', updateNumberRange);
+        endNumberInput.addEventListener('input', updateNumberRange);
+        fullResetBtn.addEventListener('click', resetDrawFromCurrentRange);
 
         // --- Ball Class ---
         class Ball {
@@ -341,7 +430,7 @@
                 this.textColor = '#ffffff';
                 
                 // 공에 표시할 텍스트 (최대 3글자)
-                this.displayChar = text.length > 3 ? text.substring(0, 3) : text;
+                this.displayChar = text.length > 4 ? text.substring(0, 4) : text;
             }
 
             update(speedMultiplier = 1) {
@@ -410,7 +499,7 @@
 
                 // 텍스트 (이름 최대 3글자)
                 ctx.fillStyle = this.textColor;
-                ctx.font = this.displayChar.length >= 3 ? 'bold 13px "Noto Sans KR"' : 'bold 16px "Noto Sans KR"';
+                ctx.font = this.displayChar.length >= 4 ? 'bold 12px "Noto Sans KR"' : this.displayChar.length >= 3 ? 'bold 14px "Noto Sans KR"' : 'bold 16px "Noto Sans KR"';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(this.displayChar, this.x, this.y);
@@ -472,7 +561,7 @@
         // --- Interaction Logic ---
         drawBtn.addEventListener('click', () => {
             if (participants.length < 1) {
-                showToast("추첨할 인원이 없습니다. 명단을 추가해주세요!");
+                showToast("추첨할 숫자 범위를 입력해주세요!");
                 return;
             }
             if (isDrawing) return;
@@ -486,10 +575,11 @@
             isDrawing = false;
             initBalls();
             
-            // 버튼 상태 복구
+            // 버튼 상태 복구: 남은 숫자만으로 연속 추첨 진행
             drawBtn.disabled = false;
             drawBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            namesInput.disabled = false;
+            startNumberInput.disabled = false;
+            endNumberInput.disabled = false;
         });
 
         function startDraw() {
@@ -498,19 +588,20 @@
             
             // 오디오 초기화 및 긴장감 BGM 재생
             initAudio();
-            playDrumroll(3.5); // 두구두구 드럼롤 소리로 변경
+            playDrumroll(2); // 두구두구 드럼롤 소리
             
             // UI 잠금
             drawBtn.disabled = true;
             drawBtn.classList.add('opacity-50', 'cursor-not-allowed');
-            namesInput.disabled = true;
+            startNumberInput.disabled = true;
+            endNumberInput.disabled = true;
 
             // 효과음(브라우저 정책상 자동재생 제약이 있으므로 시각효과에 집중)
             
-            // 3.5초간 섞기
+            // 2초간 섞기
             setTimeout(() => {
                 revealWinner();
-            }, 3500);
+            }, 2000);
         }
 
         function revealWinner() {
@@ -520,10 +611,13 @@
             const winnerIndex = Math.floor(Math.random() * participants.length);
             const winnerName = participants[winnerIndex];
 
-            // 당첨된 인원은 명단에서 제거 (중복 당첨 방지)
+            // 당첨된 숫자는 목록에서 제거 (연속 추첨 시 중복 당첨 방지)
+            drawnNumbers.push(winnerName);
             participants.splice(winnerIndex, 1);
-            countBadge.textContent = `${participants.length}명`;
-            namesInput.value = participants.join('\n'); // 텍스트 입력창에서도 제거됨
+            countBadge.textContent = `${participants.length}개`;
+            rangePreview.textContent = participants.length > 0
+                ? `당첨 제외: ${drawnNumbers.join(', ')} / 남은 숫자 ${participants.length}개`
+                : `모든 숫자가 추첨되었습니다. 당첨 순서: ${drawnNumbers.join(', ')}`;
 
             winnerText.textContent = winnerName;
 
